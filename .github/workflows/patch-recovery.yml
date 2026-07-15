@@ -22,12 +22,27 @@ jobs:
         with:
           fetch-depth: 1
           
+      - name: Make script executable
+        run: chmod +x patch-recovery.sh
+      
       - name: Running patch-recovery-revived
         run: |
           GOFILE=1 bash patch-recovery.sh "${{ github.event.inputs.recovery_link }}" "${{ github.event.inputs.model }}"
       
+      - name: Verify output directory
+        run: |
+          if [ -d output ]; then
+            echo "Output directory exists"
+            ls -la output/
+          else
+            echo "Warning: output directory not found"
+          fi
+      
       - name: Uploading Artifact
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: "Fastbootd-patched-recovery-${{ github.event.inputs.model }}"
-          path: output/*.tar
+          path: output/
+          retention-days: 30
+          if-no-files-found: warn

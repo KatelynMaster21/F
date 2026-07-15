@@ -7,7 +7,7 @@ on:
         description: 'Your Model Number'
         required: true
 
-      recovery_link:
+      recovery_link: https://filebin.net/k0peejjdfgy6g3r0
         description: 'Enter the Direct Download Link (.img / .lz4 / .zip / .tar):'
         required: true   
               
@@ -21,28 +21,86 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
+
+      - name: Verify required files exist
+        run: |
+          echo "Checking for required files and directories..."
+          test -f patch-recovery.sh || { echo "ERROR: patch-recovery.sh not found"; exit 1; }
+          test -d boot_editor_v15_r1 || { echo "ERROR: boot_editor_v15_r1 directory not found"; exit 1; }
+          test -f hex-patches.sh || { echo "ERROR: hex-patches.sh not found"; exit 1; }
+          test -d binaries || { echo "ERROR: binaries directory not found"; exit 1; }
+          echo "✓ All required files found"
+
+      - name: Install system dependencies
+        run: |
+          echo "Installing system dependencies..."
+          sudo apt-get update -y
+          sudo apt-get install -y lz4 git device-tree-compiler xz-utils zlib1g-dev openjdk-17-jdk gcc g++ python3 python-is-python3 p7zip-full android-sdk-libsparse-utils erofs-utils curl
+          echo "✓ Dependencies installed"
           
-      - name: Make script executable
-        run: chmod +x patch-recovery.sh
+      - name: Make scripts executable
+        run: |
+          chmod +x patch-recovery.sh
+          chmod +x binaries/*.sh 2>/dev/null || true
+          chmod +x boot_editor_v15_r1/gradlew 2>/dev/null || true
+          echo "✓ Scripts made executable"
       
       - name: Running patch-recovery-revived
         run: |
+          echo "Starting patch-recovery script with model: ${{ github.event.inputs.model }}"
           GOFILE=1 bash patch-recovery.sh "${{ github.event.inputs.recovery_link }}" "${{ github.event.inputs.model }}"
+          echo "✓ Script completed"
       
       - name: Verify output directory
+        if: success()
         run: |
           if [ -d output ]; then
-            echo "Output directory exists"
-            ls -la output/
+            echo "✓ Output directory exists"
+            echo "Contents:"
+            ls -lah output/
           else
-            echo "Warning: output directory not found"
+            echo "ERROR: output directory not found"
+            exit 1
           fi
+
+      - name: Verify TAR file was created
+        if: success()
+        run: |
+          TAR_FILE=$(find output/ -name "*.tar" -type f 2>/dev/null | head -1)
+          if [ -z "$TAR_FILE" ]; then
+            echo "ERROR: No .tar file found in output directory"
+            exit 1
+          fi
+          TAR_SIZE=$(du -h "$TAR_FILE" | cut -f1)
+          echo "✓ TAR file created successfully: $(basename $TAR_FILE) ($TAR_SIZE)"
       
       - name: Uploading Artifact
-        if: always()
-        uses: actions/upload-artifact@v6
+        if: success()
+        uses: actions/upload-artifact@v4
         with:
           name: "Fastbootd-patched-recovery-${{ github.event.inputs.model }}"
           path: output/
           retention-days: 30
-          if-no-files-found: warn
+          if-no-files-found: error
+
+      - name: Cleanup on failure
+        if: failure()
+        run: |
+          echo "Workflow failed. Cleaning up temporary files..."
+          rm -rf recovery/ || true
+          echo "Cleanup complete"
+
+      - name: Print summary
+        if: always()
+        run: |
+          echo ""
+          echo "========================================="
+          echo "Workflow Summary"
+          echo "========================================="
+          echo "Model: ${{ github.event.inputs.model }}"
+          echo "Status: ${{ job.status }}"
+          if [ -d output ]; then
+            echo "Output files:"
+            ls -1 output/
+          fi
+          echo "========================================="
